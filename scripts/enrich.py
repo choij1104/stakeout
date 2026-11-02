@@ -102,22 +102,30 @@ def city_of(lat, lon, places):
 
 
 # ---------------- 2. signals, stop signs, speed limits (OpenStreetMap / Overpass) ----------------
+OVERPASS_HOSTS = ("https://overpass-api.de/api/interpreter",
+                  "https://overpass.private.coffee/api/interpreter",
+                  "https://overpass.kumi.systems/api/interpreter")
+
+
+def overpass_query(q):
+    for host in OVERPASS_HOSTS:
+        for attempt in range(2):
+            try:
+                raw = get(host, data=urllib.parse.urlencode({"data": q}).encode(), timeout=400)
+                return json.loads(raw)["elements"]
+            except Exception as e:  # noqa: BLE001
+                print(f"Overpass {host} try {attempt + 1} failed: {e}")
+                time.sleep(20)
+    return None
+
+
 def overpass():
+    """Two smaller queries (nodes, then arterial ways) so public servers don't time out."""
     S, W, N, E = BBOX
-    q = f"""[out:json][timeout:300];
-(node["highway"="traffic_signals"]({S},{W},{N},{E});
- node["highway"="stop"]({S},{W},{N},{E}););
-out;
-way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential)(_link)?$"]["maxspeed"]({S},{W},{N},{E});
-out tags geom;"""
-    for host in ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"):
-        try:
-            raw = get(host, data=urllib.parse.urlencode({"data": q}).encode(), timeout=400)
-            return json.loads(raw)
-        except Exception as e:  # noqa: BLE001
-            print(f"Overpass {host} failed: {e}")
-            time.sleep(10)
-    raise SystemExit("Overpass unreachable")
+    b = f"({S},{W},{N},{E})"
+    nodes = overpass_query(f'[out:json][timeout:180];(node["highway"="traffic_signals"]{b};node["highway"="stop"]{b};);out;')
+    ways = overpass_query(f'[out:json][timeout:240];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified)(_link)?$"]["maxspeed"]{b};out tags geom;')
+    return (nodes or []) + (ways or []), nodes is not None, ways is not None
 
 
 def mph(v):
@@ -217,9 +225,9 @@ def main():
         result[s[0]]["city"] = city_of(s[3], s[4], places)
     notes["city"] = f"US Census TIGER/Line {tiger_year} places"
 
-    osm = overpass()
+    elements, got_nodes, got_ways = overpass()
     sig, stp, ways = Grid(), Grid(), Grid()
-    for el in osm["elements"]:
+    for el in elements:
         if el["type"] == "node":
             (sig if el["tags"].get("highway") == "traffic_signals" else stp).add(el["lat"], el["lon"], (el["lat"], el["lon"]))
         elif el["type"] == "way" and el.get("geometry"):
@@ -234,18 +242,21 @@ def main():
     for s in stations:
         lat, lon = s[3], s[4]
         r = result[s[0]]
-        d = [meters(lat, lon, a, b) for a, b in sig.near(lat, lon)]
-        r["signal_m"] = round(min(d)) if d else None
-        d = [meters(lat, lon, a, b) for a, b in stp.near(lat, lon)]
-        r["stop_m"] = round(min(d)) if d else None
+        if got_nodes:
+            d = [meters(lat, lon, a, b) for a, b in sig.near(lat, lon)]
+            r["signal_m"] = round(min(d)) if d else None
+            d = [meters(lat, lon, a, b) for a, b in stp.near(lat, lon)]
+            r["stop_m"] = round(min(d)) if d else None
         best = None
         for v, name, pts in {id(w): w for w in ways.near(lat, lon)}.values():
             dist = min(seg_dist(lat, lon, pts[i], pts[i + 1]) for i in range(len(pts) - 1)) if len(pts) > 1 else 1e9
             if dist < 60 and (best is None or dist < best[0]):
                 best = (dist, v, name)
-        r["speed"] = best[1] if best else None
-        r["speed_road"] = best[2] if best else None
-    notes["osm"] = "OpenStreetMap via Overpass, " + time.strftime("%Y-%m-%d")
+        if got_ways:
+            r["speed"] = best[1] if best else None
+            r["speed_road"] = best[2] if best else None
+    notes["osm"] = (f"OpenStreetMap via Overpass, {time.strftime('%Y-%m-%d')}"
+                    f" (signals/stops: {'ok' if got_nodes else 'unavailable'}, speed: {'ok' if got_ways else 'unavailable'})")
 
     try:
         field = parcel_owner_field()

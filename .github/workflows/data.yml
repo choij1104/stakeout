@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - "scripts/fetch_aadt.py"
+      - "scripts/enrich.py"
       - ".github/workflows/data.yml"
   schedule:
     - cron: "17 9 3 * *"   # 3rd of each month, 09:17 UTC
@@ -22,11 +23,15 @@ jobs:
           python-version: "3.12"
       - name: Pull Bexar County AADT stations from TxDOT
         run: python scripts/fetch_aadt.py 15 data/bexar-aadt.json
+      - name: Research each station (city limits, signals, speed, land owner type)
+        run: |
+          pip install pyshp==2.3.1
+          python scripts/enrich.py data/bexar-aadt.json data/bexar-enrich.json
       - name: Commit if changed
         run: |
           git config user.name "stakeout-data-bot"
           git config user.email "stakeout-data-bot@users.noreply.github.com"
-          git add data/bexar-aadt.json
+          git add data/bexar-aadt.json data/bexar-enrich.json
           if git diff --cached --quiet; then echo "No change"; exit 0; fi
-          git commit -m "Refresh Bexar AADT data"
+          git commit -m "Refresh Bexar data"
           git push

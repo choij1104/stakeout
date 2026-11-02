@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stakeout</title>
+<meta name="description" content="Where a yard sign gets seen, and whether you can legally put it there.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&family=Overpass+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+
+/* Layout: field-ops board. Map + ranked spots side by side, spot checker below; stacks on phone. */
+:root{
+  --bg:#f3f5f2; --panel:#ffffff; --ink:#1b2621; --muted:#5d6a63; --line:#d7ddd8;
+  --sign:#0f6b46;      /* highway-sign green: high score */
+  --sign-soft:#d9ece2;
+  --stake:#d9480f;     /* survey-flag orange: state ROW / attention */
+  --stake-soft:#fbe4d8;
+  --low:#b9c2bc;
+  --ok:#1f7a3a; --warn:#b26a00; --bad:#b42318;
+  --f-display:"Overpass", "Helvetica Neue", Arial, sans-serif;
+  --f-mono:"Overpass Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111814; --panel:#18211c; --ink:#e4ebe6; --muted:#9aa8a0; --line:#2b3730;
+  --sign:#3fbf86; --sign-soft:#173a2a; --stake:#ff7a3d; --stake-soft:#3a2216; --low:#46534b;
+  --ok:#4cc27a; --warn:#e3a33a; --bad:#ff6b5e; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111814; --panel:#18211c; --ink:#e4ebe6; --muted:#9aa8a0; --line:#2b3730;
+  --sign:#3fbf86; --sign-soft:#173a2a; --stake:#ff7a3d; --stake-soft:#3a2216; --low:#46534b;
+  --ok:#4cc27a; --warn:#e3a33a; --bad:#ff6b5e; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-display);font-size:15px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;border-bottom:3px solid var(--ink);padding-bottom:12px}
+h1{font-weight:800;font-size:clamp(28px,4.5vw,44px);letter-spacing:-.01em;margin:0;line-height:1;text-wrap:balance}
+h1 span{color:var(--sign)}
+.sub{color:var(--muted);margin:6px 0 0;max-width:62ch}
+.datatag{font-family:var(--f-mono);font-size:12px;color:var(--muted);text-align:right}
+.datatag b{color:var(--ink)}
+h2{font-size:13px;letter-spacing:.09em;text-transform:uppercase;margin:0 0 10px;font-weight:800}
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px}
+@media (max-width:860px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px;min-width:0}
+.controls{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin-bottom:10px;font-size:13px}
+.controls label{display:flex;gap:6px;align-items:center;cursor:pointer}
+#map{width:100%;height:auto;display:block;touch-action:none;cursor:grab}
+#map.drag{cursor:grabbing}
+.zoom{display:inline-flex;gap:4px;margin-left:auto}
+.zoom button{all:unset;font-family:var(--f-mono);font-weight:600;min-width:30px;height:30px;text-align:center;line-height:30px;border:1px solid var(--line);border-radius:4px;cursor:pointer;background:var(--panel);padding:0 6px}
+.zoom button:focus-visible{outline:2px solid var(--sign)}
+.navbtns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.navbtns a,.navbtns button{all:unset;cursor:pointer;font-weight:800;font-size:14px;padding:9px 14px;border-radius:4px;background:var(--sign);color:var(--bg)}
+.navbtns a.alt,.navbtns button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.navbtns a:focus-visible,.navbtns button:focus-visible{outline:2px solid var(--ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:11px;height:11px;margin-right:5px;vertical-align:-1px}
+.lg-local{border-radius:50%;background:var(--sign)}
+.lg-state{border:2px solid var(--stake);background:transparent}
+.lg-grad{width:60px!important;border-radius:2px;background:linear-gradient(90deg,var(--low),var(--sign))}
+ol.rank{list-style:none;margin:0;padding:0;display:grid;gap:4px;max-height:560px;overflow:auto}
+ol.rank li button{all:unset;box-sizing:border-box;width:100%;display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 10px;border-radius:4px;cursor:pointer;border:1px solid transparent}
+ol.rank li button:hover,ol.rank li button:focus-visible{background:var(--sign-soft)}
+ol.rank li button:focus-visible{outline:2px solid var(--sign)}
+ol.rank li.sel button{border-color:var(--sign);background:var(--sign-soft)}
+.score{font-family:var(--f-mono);font-weight:600;font-size:17px;text-align:right;font-variant-numeric:tabular-nums}
+.rd{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.pill{font-family:var(--f-mono);font-size:10.5px;padding:2px 6px;border-radius:3px;white-space:nowrap;letter-spacing:.03em}
+.p-state{background:var(--stake-soft);color:var(--stake)}
+.p-local{background:var(--sign-soft);color:var(--sign)}
+.detail{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+@media (max-width:760px){.detail{grid-template-columns:1fr}}
+.big{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.big .n{font-family:var(--f-mono);font-size:54px;font-weight:600;line-height:1;color:var(--sign)}
+.big .t{font-size:20px;font-weight:800}
+.bars{display:grid;gap:6px;margin:12px 0}
+.bar{display:grid;grid-template-columns:120px minmax(0,1fr) 38px;gap:8px;align-items:center;font-size:12.5px}
+.bar .track{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+.bar .fill{height:100%;background:var(--sign)}
+.bar .v{font-family:var(--f-mono);text-align:right;font-variant-numeric:tabular-nums}
+fieldset{border:0;padding:0;margin:0 0 10px;display:grid;gap:6px}
+legend{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800;color:var(--muted);margin-bottom:4px}
+.q{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;font-size:13.5px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.seg button{all:unset;padding:3px 9px;font-size:12px;cursor:pointer;font-family:var(--f-mono)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.seg button:focus-visible{outline:2px solid var(--sign)}
+.verdict{border-radius:4px;padding:10px 12px;font-size:13.5px;margin-top:6px}
+.v-ok{background:var(--sign-soft);border-left:4px solid var(--ok)}
+.v-no{background:var(--stake-soft);border-left:4px solid var(--bad)}
+.v-wait{background:var(--panel);border:1px dashed var(--line);border-left:4px solid var(--warn)}
+.verdict ul{margin:6px 0 0;padding-left:18px}
+a{color:var(--sign)}
+.links{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;margin-top:8px}
+.weights{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px 18px;font-size:12.5px}
+.weights label{display:grid;gap:2px}
+.weights input{width:100%;accent-color:var(--sign)}
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;font-size:13.5px}
+.rules h3{font-size:14px;margin:0 0 4px}
+.rules p{margin:0;color:var(--muted)}
+.src{font-family:var(--f-mono);font-size:11px;color:var(--muted);margin-top:6px}
+.loader{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:13px}
+.loader input[type=file]{font-size:12px;max-width:100%}
+.note{font-size:12px;color:var(--muted)}
+.empty{color:var(--muted);font-size:14px;padding:20px 0}
+@media (prefers-reduced-motion:no-preference){.fill{transition:width .25s}}
+
+:root{color-scheme:light}
+body{margin:0}
+#map{height:min(68vh,640px);min-height:380px;border-radius:4px;cursor:auto;touch-action:auto}
+.leaflet-container{font-family:var(--f-display);background:var(--bg)}
+.leaflet-tooltip.st-tip{font-family:var(--f-display);font-weight:800;font-size:12px;border-radius:3px}
+.addr{font-size:14px;margin:8px 0 0;min-height:1.4em}
+.addr small{display:block;color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>Stake<span>out</span> <small style="font-size:.45em;font-weight:600;color:var(--muted);letter-spacing:.04em">BEXAR CO., TX</small></h1>
+    <p class="sub">Where a yard sign gets seen, and whether you can legally put it there. Ranked from TxDOT traffic counts, then checked against Texas and San Antonio sign rules.</p>
+  </div>
+  <div class="datatag" id="datatag">Loading stations…</div>
+</header>
+
+<div class="grid">
+  <section class="card" aria-labelledby="h-map">
+    <h2 id="h-map">Map</h2>
+    <div class="controls">
+      <label><input type="checkbox" id="f-ih"> Show interstates</label>
+      <label><input type="checkbox" id="f-local"> Local streets only</label>
+      <span class="zoom"><button type="button" id="z-me">Near me</button><button type="button" id="z-reset">Fit all</button></span>
+    </div>
+    <div id="map" role="region" aria-label="Street map of traffic count stations colored by visibility score"></div>
+    <div class="legend">
+      <span><i class="lg-local"></i>Local street (city/county road)</span>
+      <span><i class="lg-state"></i>State route: TxDOT right-of-way off-limits</span>
+      <span><i class="lg-grad"></i>Score low → high</span>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-rank">
+    <h2 id="h-rank">Best spots</h2>
+    <ol class="rank" id="rank"></ol>
+  </section>
+</div>
+
+<section class="card" aria-labelledby="h-spot">
+  <h2 id="h-spot">Spot check</h2>
+  <div id="detail"><p class="empty">Pick a station on the map or in the list.</p></div>
+</section>
+
+<section class="card" aria-labelledby="h-w">
+  <h2 id="h-w">Score weights</h2>
+  <div class="weights" id="weights"></div>
+  <p class="note">Base score uses traffic and road type only. Field checks (stops, speed, sight line, polling place, crowding) adjust a spot once you answer them. Road-type readability values are working assumptions, not measured data.</p>
+</section>
+
+<section class="card" aria-labelledby="h-rules">
+  <h2 id="h-rules">Placement rules used</h2>
+  <div class="rules">
+    <div><h3>State routes (IH, US, SH, FM, Loop…)</h3>
+      <p>No signs anywhere in TxDOT right-of-way, including on poles, trees and traffic signs. Use private frontage behind the right-of-way line, with the owner's OK.</p>
+      <div class="src">TxDOT Right of Way Division, campaign signs</div></div>
+    <div><h3>City of San Antonio</h3>
+      <p>Private property only, with owner approval before installation; at least 2 ft inside the property line; 32 sq ft or less; staked or secured; up no more than 90 consecutive days; no hazard. Not on City-owned property. Another city page says political signs may sit in city right-of-way, so the app treats that as unconfirmed. Questions: Chief Sign Inspector, 210-207-0158.</p>
+      <div class="src">SA Development Services guide (2018), Code Ch. 28 rev. May 2017</div></div>
+    <div><h3>Polling places</h3>
+      <p>No signs or electioneering within 100 ft of an outside door voters use, from polls opening until the last voter has voted.</p>
+      <div class="src">Tex. Elec. Code §61.003</div></div>
+    <div><h3>Private property, statewide</h3>
+      <p>A city may not ban a primarily political sign on private property placed with the owner's consent, within state size limits. HOAs have their own window under §259.002.</p>
+      <div class="src">Tex. Elec. Code §259.004 (formerly Loc. Gov't Code §216.903)</div></div>
+  </div>
+  <p class="note">Other cities in Bexar County (Selma, Schertz, Converse, Leon Valley…) and unincorporated areas have their own ordinances. This is a planning aid, not legal advice.</p>
+</section>
+
+<section class="card" aria-labelledby="h-data">
+  <h2 id="h-data">Data</h2>
+  <p class="note">Traffic counts: TxDOT Annual Average Daily Traffic Counts (Public), refreshed monthly. TxDOT's license limits this data to internal, non-commercial use without TxDOT's written consent. Street map and addresses © OpenStreetMap contributors.</p>
+</section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Fallback: real TxDOT 2025 AADT stations, Bexar County (sample of 63 pulled 2026-11-02).
+const SAMPLE=[
+["15A9001","US0090",86561,29.378995,-98.71302],["15D2A","US0181",30731,29.307823,-98.396388],
+["15D36","FM1957",38569,29.42960623,-98.73912138],["15D37","FM1957",39506,29.42509547,-98.75546673],
+["15D38","FM1957",50452,29.43322379,-98.72140884],["15E19A","US0090",31896,29.365787,-98.803849],
+["15E24B","US0281",61829,29.71862,-98.444201],["15H1007","ALAMO RANCH PKWY",36324,29.486865,-98.720367],
+["15H12","SL1604",113425,29.591953,-98.589327],["15H122","SL1604",41365,29.467336,-98.292855],
+["15H123","SL1604",47065,29.52508,-98.29573],["15H124","SL1604",69932,29.540083,-98.306459],
+["15H125","SL1604",67347,29.555186,-98.323594],["15H127","FM0078",31188,29.537594,-98.298036],
+["15H128A","FM0078",34006,29.550501,-98.273738],["15H135","FM1957",40316,29.435671,-98.708243],
+["15H136","FM1957",45996,29.435371,-98.712615],["15H136C","FM1957",31370,29.421318,-98.780325],
+["15H137","SL1604",55327,29.385344,-98.701321],["15H140","US0090",101538,29.39106,-98.666322],
+["15H143","US0090",70260,29.401993,-98.630831],["15H144","SL0013",31046,29.400753,-98.627157],
+["15H145","US0090",71896,29.404853,-98.615786],["15H145A","SH0151",89945,29.411107,-98.589505],
+["15H145B","SH0151",70069,29.431956,-98.637474],["15H15102","SH0151",74446,29.425545,-98.597403],
+["15H15103","SH0151",86234,29.475932,-98.698752],["15H160401","SL1604",36111,29.426688,-98.711284],
+["15H160402","SL1604",35488,29.442883,-98.711271],["15H160403","SL1604",37697,29.472957,-98.711011],
+["15H160404","SL1604",101958,29.528979,-98.685385],["15H160405","SL1604",116351,29.596678,-98.570126],
+["15H160406","SL1604",83974,29.609787,-98.482405],["15H160407","SL1604",107906,29.60458,-98.451605],
+["15H160408","SL1604",75987,29.589447,-98.610831],["15H18","SL1604",99962,29.604006,-98.532157],
+["15H200","US0087",32069,29.398095,-98.383617],["15H23","US0281",166787,29.578383,-98.477542],
+["15H23B","PA1502",55014,29.547136,-98.449728],["15H23C","PA1502",47074,29.546124,-98.432319],
+["15HP1105","CANYON GOLF RD",13140,29.686856,-98.476027],["15HP1115","VANCE JACKSON RD",14118,29.574327,-98.585622],
+["15HP1127","CANYON GOLF RD",10103,29.662762,-98.478444],["15HP17","DE ZAVALA RD",32467,29.563102,-98.592267],
+["15HP18","DE ZAVALA RD",10823,29.575286,-98.567226],["15HP38","EVANS RD",24281,29.647724,-98.423641],
+["15HP5184","QUINTANA RD",20726,29.38184599,-98.551211],["15HP53","GIBBS SPRAWL RD",9804,29.496695,-98.350184],
+["15HP5919","QUINTANA RD",11404,29.36781605,-98.55998299],["15HP86","MARBACH RD",33365,29.417836,-98.650853],
+["15MC11","HARRY WURZBACH RD",9008,29.46307,-98.445799],["15UH109","EVERS RD",20857,29.486806,-98.595322],
+["15UH110","EVERS RD",15616,29.48413,-98.591825],["15XD15","JUDSON RD",16606,29.57728599,-98.371999],
+["15XJ55","CULEBRA RD",20809,29.447406,-98.547941],["15XK83","HARRY WURZBACH RD",18908,29.481168,-98.432103],
+["15HP1068","N ZARZAMORA ST",13498,29.428712,-98.526862],["15HP5431","HARRY HINES BLVD",15850,29.51416399,-98.436683],
+["15HP5916","W ELMIRA ST",9831,29.436056,-98.494895],["15SP313","S ZARZAMORA ST",21950,29.316022,-98.53261],
+["15XJ49","W COMMERCE ST",19577,29.429899,-98.545775],["15XJ65","N ZARZAMORA ST",17337,29.437291,-98.525837]
+];
+
+const CLASSES={
+  IH:{name:"Interstate",state:true,read:.2},
+  SL:{name:"State loop",state:true,read:.45},LP:{name:"State loop",state:true,read:.45},
+  US:{name:"US highway",state:true,read:.5},SH:{name:"State highway",state:true,read:.55},
+  PA:{name:"Principal arterial",state:true,read:.6},SS:{name:"State spur",state:true,read:.65},SP:{name:"State spur",state:true,read:.65},
+  BU:{name:"Business route",state:true,read:.7},BS:{name:"Business route",state:true,read:.7},BI:{name:"Business route",state:true,read:.7},
+  FM:{name:"Farm-to-market",state:true,read:.75},RM:{name:"Ranch-to-market",state:true,read:.75},
+  LOCAL:{name:"Local street",state:false,read:.9}
+};
+function classify(road){
+  const r=String(road||"").toUpperCase().trim();
+  const m=r.match(/^([A-Z]{2})\s?0*(\d{1,4})\b/);
+  if(m&&CLASSES[m[1]]) return {key:m[1],label:m[1]+" "+m[2],...CLASSES[m[1]]};
+  return {key:"LOCAL",label:r.replace(/\s+/g," ")||"Unnamed road",...CLASSES.LOCAL};
+}
+
+const W_DEFAULT={traffic:55,read:45,stop:15,sight:10,poll:10,crowd:10};
+let W={...W_DEFAULT};
+const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const saved=store.get("so-weights"); if(saved) W={...W,...saved};
+const field=store.get("so-field")||{};
+
+let stations=[], selected=null;
+function build(rows){
+  const seen=new Set();
+  return rows.filter(r=>r.lat&&r.lon&&r.aadt>0&&!seen.has(r.id)&&seen.add(r.id)).map(r=>({...r,cls:classify(r.road)}));
+}
+const fromArr=a=>a.map(([id,road,aadt,lat,lon])=>({id,road,aadt,lat,lon}));
+
+function trafficScore(a){const lo=2000,hi=150000;return Math.max(0,Math.min(1,Math.log10(a/lo)/Math.log10(hi/lo)))}
+function score(s){
+  const t=trafficScore(s.aadt), f=field[s.id]||{};
+  const rr=f.speed?{low:.95,mid:.65,high:.3}[f.speed]:s.cls.read;
+  let sum=W.traffic*t+W.read*rr, den=W.traffic+W.read;
+  const parts={traffic:t,read:rr};
+  if(f.stop){const v=f.stop==="yes"?1:0;sum+=W.stop*v;den+=W.stop;parts.stop=v}
+  if(f.sight){const v=f.sight==="yes"?1:0;sum+=W.sight*v;den+=W.sight;parts.sight=v}
+  if(f.poll){const v=f.poll==="yes"?1:0;sum+=W.poll*v;den+=W.poll;parts.poll=v}
+  if(f.crowd){const v=f.crowd==="yes"?0:1;sum+=W.crowd*v;den+=W.crowd;parts.crowd=v}
+  return {total:den?Math.round(100*sum/den):0,parts};
+}
+function visible(){
+  const ih=document.getElementById("f-ih").checked, lo=document.getElementById("f-local").checked;
+  return stations.filter(s=>(ih||s.cls.key!=="IH")&&(!lo||!s.cls.state));
+}
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function mix(a,b,p){const h=x=>x.match(/\w\w/g).map(c=>parseInt(c,16));const A=h(a),B=h(b);return "#"+A.map((v,i)=>Math.round(v+(B[i]-v)*p).toString(16).padStart(2,"0")).join("")}
+function esc(t){return String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+
+// ---------- map ----------
+const map=L.map("map",{zoomControl:true,preferCanvas:true}).setView([29.4246,-98.4951],11);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
+const layer=L.layerGroup().addTo(map);
+let markers={};
+function drawMap(){
+  layer.clearLayers(); markers={};
+  const low=css("--low")||"#b9c2bc", sign=css("--sign")||"#0f6b46", stake=css("--stake")||"#d9480f";
+  const list=visible().map(s=>({s,sc:score(s).total})).sort((a,b)=>a.sc-b.sc);
+  for(const {s,sc} of list){
+    const sel=selected===s.id;
+    const m=L.circleMarker([s.lat,s.lon],{radius:(sel?9:5)+5*trafficScore(s.aadt),fillColor:mix(low,sign,sc/100),fillOpacity:.92,
+      color:s.cls.state?stake:"#ffffff",weight:sel?4:(s.cls.state?2.5:1.5),dashArray:s.cls.state?"4 3":null});
+    m.bindTooltip(`${esc(s.cls.label)} · ${sc}`,{className:"st-tip",direction:"top",permanent:sel});
+    m.on("click",()=>select(s.id,false));
+    m.addTo(layer); markers[s.id]=m;
+  }
+}
+function fitAll(){const v=visible();if(v.length)map.fitBounds(L.latLngBounds(v.map(s=>[s.lat,s.lon])),{padding:[20,20]})}
+document.getElementById("z-reset").addEventListener("click",fitAll);
+document.getElementById("z-me").addEventListener("click",e=>{
+  if(!navigator.geolocation){e.target.textContent="No location";return}
+  navigator.geolocation.getCurrentPosition(p=>{map.setView([p.coords.latitude,p.coords.longitude],14);L.circleMarker([p.coords.latitude,p.coords.longitude],{radius:7,color:"#1565c0",fillColor:"#1e88e5",fillOpacity:1,weight:3}).addTo(map).bindTooltip("You")},()=>{e.target.textContent="Location off"},{enableHighAccuracy:true,timeout:10000});
+});
+
+// ---------- rank ----------
+function drawRank(){
+  const ol=document.getElementById("rank"); ol.textContent="";
+  const list=visible().map(s=>({s,sc:score(s).total})).sort((a,b)=>b.sc-a.sc);
+  if(!list.length){ol.innerHTML='<li class="empty">No stations match these filters.</li>';return}
+  for(const {s,sc} of list){
+    const li=document.createElement("li"); if(selected===s.id) li.className="sel";
+    li.innerHTML=`<button type="button"><span class="score">${sc}</span>
+      <span style="min-width:0"><div class="rd">${esc(s.cls.label)}</div><div class="meta">${s.aadt.toLocaleString()} veh/day · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}</div></span>
+      <span class="pill ${s.cls.state?"p-state":"p-local"}">${s.cls.state?"TxDOT ROW":"LOCAL"}</span></button>`;
+    li.querySelector("button").addEventListener("click",()=>select(s.id,true));
+    ol.appendChild(li);
+  }
+}
+
+// ---------- address (OpenStreetMap Nominatim, one request per selected spot) ----------
+const addrCache={};
+async function lookupAddress(s){
+  if(addrCache[s.id]) return addrCache[s.id];
+  const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&lat=${s.lat}&lon=${s.lon}`;
+  const r=await fetch(url,{headers:{"Accept-Language":"en"}});
+  if(!r.ok) throw new Error(r.status);
+  const j=await r.json(); const a=j.address||{};
+  const line=[[a.house_number,a.road].filter(Boolean).join(" "),a.neighbourhood||a.suburb,a.city||a.town||a.village,a.postcode].filter(Boolean).join(", ");
+  return addrCache[s.id]=line||j.display_name||"No address found";
+}
+
+// ---------- spot check ----------
+const QS=[
+ {k:"stop",t:"Cars stop here (signal or stop sign)?",o:[["yes","Yes"],["no","No"]]},
+ {k:"speed",t:"Posted speed",o:[["low","≤35"],["mid","40–50"],["high","55+"]]},
+ {k:"sight",t:"Clear view toward oncoming traffic?",o:[["yes","Yes"],["no","No"]]},
+ {k:"poll",t:"Polling place within ¼ mile?",o:[["yes","Yes"],["no","No"]]},
+ {k:"crowd",t:"Already crowded with signs?",o:[["yes","Yes"],["no","No"]]},
+];
+const LQ=[
+ {k:"city",t:"Inside City of San Antonio limits?",o:[["yes","Yes"],["no","No"],["unsure","Unsure"]]},
+ {k:"private",t:"On private property, owner approved?",o:[["yes","Yes"],["no","No"]]},
+ {k:"line",t:"At least 2 ft inside the property line, outside any right-of-way?",o:[["yes","Yes"],["no","No"]]},
+ {k:"size",t:"Sign 32 sq ft or less, staked or secured?",o:[["yes","Yes"],["no","No"]]},
+ {k:"door",t:"More than 100 ft from a voter entrance (on voting days)?",o:[["yes","Yes"],["no","No"]]},
+];
+function verdict(s){
+  const f=field[s.id]||{}, fails=[], open=[];
+  if(f.private==="no") fails.push("San Antonio allows political signs on private property only, with the owner's approval first.");
+  if(f.line==="no") fails.push(s.cls.state?"Inside TxDOT right-of-way: illegal on a state route. Move behind the ROW line.":"Keep it at least 2 ft inside the property line (SA guide).");
+  if(f.size==="no") fails.push("Over 32 sq ft or not secured: needs a permit in San Antonio.");
+  if(f.door==="no") fails.push("Within 100 ft of a voter entrance during voting hours (Elec. Code §61.003).");
+  for(const q of LQ) if(!f[q.k]) open.push(q.t);
+  if(f.city==="no") open.unshift("Outside San Antonio: check that city's sign ordinance (or county rules if unincorporated).");
+  if(f.city==="unsure") open.unshift("Confirm the jurisdiction before placing.");
+  if(fails.length) return {cls:"v-no",head:"Not allowed as described",items:fails};
+  if(open.length) return {cls:"v-wait",head:"Not cleared yet",items:open};
+  return {cls:"v-ok",head:"Clear to place",items:[s.cls.state?"Private frontage, behind TxDOT right-of-way, owner approved.":"Private property, owner approved, 2 ft inside the line.","Remove within 90 consecutive days."]};
+}
+function seg(id,q,f){
+  return `<div class="q"><span id="${id}-${q.k}-l">${q.t}</span><span class="seg" role="group" aria-labelledby="${id}-${q.k}-l">${q.o.map(([v,l])=>`<button type="button" id="${id}-${q.k}-${v}" data-k="${q.k}" data-v="${v}" aria-pressed="${f[q.k]===v}">${l}</button>`).join("")}</span></div>`;
+}
+function drawDetail(){
+  const box=document.getElementById("detail"), s=stations.find(x=>x.id===selected);
+  if(!s){box.innerHTML='<p class="empty">Pick a station on the map or in the list.</p>';return}
+  const {total,parts}=score(s), f=field[s.id]||{}, v=verdict(s);
+  const names={traffic:"Traffic",read:"Readable at speed",stop:"Cars stop",sight:"Sight line",poll:"Near polling place",crowd:"Uncrowded"};
+  const bars=Object.entries(parts).map(([k,val])=>`<div class="bar"><span>${names[k]}</span><span class="track"><span class="fill" style="width:${Math.round(val*100)}%;display:block"></span></span><span class="v">${Math.round(val*100)}</span></div>`).join("");
+  const q=`${s.lat},${s.lon}`;
+  box.innerHTML=`<div class="detail">
+   <div>
+     <div class="big"><span class="n">${total}</span><span><div class="t">${esc(s.cls.label)}</div>
+     <div class="meta">${s.cls.name} · ${s.aadt.toLocaleString()} vehicles/day · station ${esc(s.id)}</div></span></div>
+     <p class="addr" id="addr">${addrCache[s.id]?esc(addrCache[s.id]):"Looking up nearest address…"}<small>Nearest address from OpenStreetMap, approximate</small></p>
+     <div class="bars">${bars}</div>
+     <div class="navbtns">
+       <a href="https://www.google.com/maps/dir/?api=1&destination=${q}&travelmode=driving" target="_blank" rel="noopener">Drive here (Google)</a>
+       <a class="alt" href="https://maps.apple.com/?daddr=${q}&dirflg=d" target="_blank" rel="noopener">Apple Maps</a>
+       <a class="alt" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${q}" target="_blank" rel="noopener">Street View</a>
+     </div>
+     <div class="links"><span class="meta" id="coord">${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}</span>
+       <button type="button" id="copyc" class="seg" style="padding:2px 8px;cursor:pointer;background:none;color:var(--ink);font:inherit;font-size:12px">Copy coordinates</button></div>
+     <p class="note">The count station marks a road segment. Use Street View to find the actual corner and the private lot you'd ask.</p>
+   </div>
+   <div>
+     <fieldset><legend>Field check</legend>${QS.map(q=>seg("fq",q,f)).join("")}</fieldset>
+     <fieldset><legend>Legal check</legend>${LQ.map(q=>seg("lq",q,f)).join("")}</fieldset>
+     <div class="verdict ${v.cls}"><b>${v.head}</b>${v.items.length?`<ul>${v.items.map(i=>`<li>${esc(i)}</li>`).join("")}</ul>`:""}</div>
+   </div></div>`;
+  if(!addrCache[s.id]) lookupAddress(s).then(a=>{const el=document.getElementById("addr");if(el&&selected===s.id)el.firstChild.textContent=a}).catch(()=>{const el=document.getElementById("addr");if(el)el.firstChild.textContent="Address lookup unavailable; use the coordinates below."});
+  document.getElementById("copyc").addEventListener("click",async e=>{
+    const t=document.getElementById("coord").textContent;
+    try{await navigator.clipboard.writeText(t);e.target.textContent="Copied"}
+    catch(err){const r=document.createRange();r.selectNodeContents(document.getElementById("coord"));const sl=getSelection();sl.removeAllRanges();sl.addRange(r);e.target.textContent="Selected, copy it"}
+  });
+  box.querySelectorAll(".seg button[data-k]").forEach(b=>b.addEventListener("click",()=>{
+    const k=b.dataset.k,val=b.dataset.v; field[s.id]=field[s.id]||{};
+    field[s.id][k]=field[s.id][k]===val?undefined:val; store.set("so-field",field); renderAll();
+    const again=document.getElementById(b.id); if(again) again.focus();
+  }));
+}
+function select(id,pan){selected=id;renderAll();const s=stations.find(x=>x.id===id);if(pan&&s)map.setView([s.lat,s.lon],Math.max(map.getZoom(),15));if(!pan)document.getElementById("h-spot").scrollIntoView({behavior:"smooth",block:"start"})}
+
+// ---------- weights ----------
+function drawWeights(){
+  const labels={traffic:"Traffic volume",read:"Readable at speed",stop:"Cars stop",sight:"Sight line",poll:"Near polling place",crowd:"Uncrowded"};
+  const box=document.getElementById("weights");
+  box.innerHTML=Object.keys(W).map(k=>`<label for="w-${k}">${labels[k]} <span class="meta" id="wv-${k}">${W[k]}</span><input type="range" id="w-${k}" min="0" max="100" value="${W[k]}"></label>`).join("")+`<label><span>&nbsp;</span><button type="button" id="w-reset" class="seg" style="padding:4px 10px;cursor:pointer;background:none;color:var(--ink);font:inherit">Reset weights</button></label>`;
+  for(const k of Object.keys(W)){document.getElementById("w-"+k).addEventListener("input",e=>{W[k]=+e.target.value;document.getElementById("wv-"+k).textContent=W[k];store.set("so-weights",W);drawMap();drawRank();drawDetail()})}
+  document.getElementById("w-reset").addEventListener("click",()=>{W={...W_DEFAULT};store.set("so-weights",W);drawWeights();renderAll()});
+}
+
+let dataLabel="";
+function renderAll(){document.getElementById("datatag").innerHTML=dataLabel;drawMap();drawRank();drawDetail()}
+["f-ih","f-local"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderAll();fitAll()}));
+drawWeights();
+
+(async()=>{
+  try{
+    const r=await fetch("data/bexar-aadt.json",{cache:"no-cache"}); if(!r.ok) throw 0;
+    const d=await r.json(); stations=build(fromArr(d.stations));
+    dataLabel=`<b>${stations.length}</b> TxDOT count stations · AADT ${d.aadt_year||""}<br>updated ${esc(d.fetched||"")}`;
+  }catch(e){
+    stations=build(fromArr(SAMPLE));
+    dataLabel=`<b>Sample:</b> ${stations.length} real TxDOT 2025 stations<br>full data loads after the first refresh`;
+  }
+  selected=[...stations].filter(s=>!s.cls.state).sort((a,b)=>score(b).total-score(a).total)[0]?.id||null;
+  renderAll(); fitAll();
+})();
+</script>
+</body>
+</html>

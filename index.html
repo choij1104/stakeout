@@ -115,6 +115,12 @@ body{margin:0}
 .leaflet-tooltip.st-tip{font-family:var(--f-display);font-weight:800;font-size:12px;border-radius:3px}
 .addr{font-size:14px;margin:8px 0 0;min-height:1.4em}
 .addr small{display:block;color:var(--muted);font-size:11px}
+.p-free{background:var(--sign-soft);color:var(--ok)}
+.p-consent{background:var(--stake-soft);color:var(--stake)}
+.p-check{background:var(--stake-soft);color:var(--warn)}
+.auto{font-family:var(--f-mono);font-size:10px;color:var(--muted);margin-left:6px;letter-spacing:.04em}
+.found{display:grid;gap:4px;font-size:13px;margin:10px 0;padding:10px 12px;border:1px solid var(--line);border-radius:4px}
+.found b{font-weight:800}
 </style>
 </head>
 <body>
@@ -133,12 +139,14 @@ body{margin:0}
     <div class="controls">
       <label><input type="checkbox" id="f-ih"> Show interstates</label>
       <label><input type="checkbox" id="f-local"> Local streets only</label>
+      <label><input type="checkbox" id="f-free"> No-permission spots only</label>
       <span class="zoom"><button type="button" id="z-me">Near me</button><button type="button" id="z-reset">Fit all</button></span>
     </div>
     <div id="map" role="region" aria-label="Street map of traffic count stations colored by visibility score"></div>
     <div class="legend">
-      <span><i class="lg-local"></i>Local street (city/county road)</span>
-      <span><i class="lg-state"></i>State route: TxDOT right-of-way off-limits</span>
+      <span><i class="lg-local" style="background:transparent;border:3px solid #1f7a3a"></i>No permission needed (SA city street)</span>
+      <span><i class="lg-state"></i>Owner's consent needed (state route or county road)</span>
+      <span><i class="lg-local" style="background:transparent;border:3px solid #b26a00"></i>Other city: check its rule</span>
       <span><i class="lg-grad"></i>Score low → high</span>
     </div>
   </section>
@@ -167,21 +175,21 @@ body{margin:0}
       <p>No signs anywhere in TxDOT right-of-way, including on poles, trees and traffic signs. Use private frontage behind the right-of-way line, with the owner's OK.</p>
       <div class="src">TxDOT Right of Way Division, campaign signs</div></div>
     <div><h3>City of San Antonio</h3>
-      <p>Private property only, with owner approval before installation; at least 2 ft inside the property line; 32 sq ft or less; staked or secured; up no more than 90 consecutive days; no hazard. Not on City-owned property. Another city page says political signs may sit in city right-of-way, so the app treats that as unconfirmed. Questions: Chief Sign Inspector, 210-207-0158.</p>
-      <div class="src">SA Development Services guide (2018), Code Ch. 28 rev. May 2017</div></div>
+      <p>Political signs may stand in the right-of-way of City-maintained streets and stay up to 90 days after the election. Stake them in the ground; never on poles, trees, fences or signs; never in the 25-ft corner triangle or a driver's sight line. Private property needs the owner's written permission. Questions: Chief Sign Inspector, 210-207-0158.</p>
+      <div class="src">SA Code Enforcement; Code Ch. 28 §§28-6, 28-10, 28-41, 28-75; Transp. Code §393.0025</div></div>
     <div><h3>Polling places</h3>
       <p>No signs or electioneering within 100 ft of an outside door voters use, from polls opening until the last voter has voted.</p>
       <div class="src">Tex. Elec. Code §61.003</div></div>
     <div><h3>Private property, statewide</h3>
-      <p>A city may not ban a primarily political sign on private property placed with the owner's consent, within state size limits. HOAs have their own window under §259.002.</p>
-      <div class="src">Tex. Elec. Code §259.004 (formerly Loc. Gov't Code §216.903)</div></div>
+      <p>With the owner's consent, a city may not ban, permit, charge for or size-limit a mainly political sign up to 36 sq ft and 8 ft tall, unlit and without moving parts. County-road right-of-way outside cities is banned ($500–$1,000 a day). HOAs: §259.002.</p>
+      <div class="src">Tex. Elec. Code §259.003; Transp. Code §§393.002, 393.007</div></div>
   </div>
   <p class="note">Other cities in Bexar County (Selma, Schertz, Converse, Leon Valley…) and unincorporated areas have their own ordinances. This is a planning aid, not legal advice.</p>
 </section>
 
 <section class="card" aria-labelledby="h-data">
   <h2 id="h-data">Data</h2>
-  <p class="note">Traffic counts: TxDOT Annual Average Daily Traffic Counts (Public), refreshed monthly. TxDOT's license limits this data to internal, non-commercial use without TxDOT's written consent. Street map and addresses © OpenStreetMap contributors.</p>
+  <p class="note">Full legal summary with sources: <a href="https://claude.ai/artifact/Yb6FhAdrXMJ4VbnDK4dXQj" target="_blank" rel="noopener">Political Sign Law — San Antonio &amp; Texas</a>. City limits: US Census TIGER/Line 2025. Signals, stop signs, speed limits: OpenStreetMap. Land-owner type: Bexar Appraisal District (owner names shown only for public owners). Traffic counts: TxDOT Annual Average Daily Traffic Counts (Public), refreshed monthly. TxDOT's license limits this data to internal, non-commercial use without TxDOT's written consent. Street map and addresses © OpenStreetMap contributors.</p>
 </section>
 </div>
 
@@ -244,7 +252,21 @@ const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){retu
 const saved=store.get("so-weights"); if(saved) W={...W,...saved};
 const field=store.get("so-field")||{};
 
-let stations=[], selected=null;
+let stations=[], selected=null, ENR={};
+const SPD=v=>v==null?null:(v<=35?"low":v<=50?"mid":"high");
+function auto(s){const e=ENR[s.id]||{};const a={};
+  if(e.signal_m!=null||e.stop_m!=null) a.stop=((e.signal_m!=null&&e.signal_m<=120)||(e.stop_m!=null&&e.stop_m<=60))?"yes":"no";
+  if(e.speed) a.speed=SPD(e.speed);
+  if(e.city) a.city=e.city==="San Antonio city"?"yes":"no";
+  return a}
+function ans(s,k){const f=field[s.id]||{};return f[k]!==undefined?f[k]:auto(s)[k]}
+// Placement status from the rules in the Political Sign Law doc
+function status(s){const e=ENR[s.id]||{};const city=e.city||"";
+  if(s.cls.state) return {k:"consent",label:"Owner OK needed",why:"State route: TxDOT right-of-way is banned. Private frontage behind it needs the owner's consent."};
+  if(city==="San Antonio city") return {k:"free",label:"No permission",why:"City-maintained street in San Antonio: political signs may stand in City right-of-way and stay up to 90 days after the election. Stake it; not on poles, trees or fences; not in the 25-ft corner triangle or a driver's sight line."};
+  if(city==="Unincorporated") return {k:"consent",label:"Owner OK needed",why:"Unincorporated county road: right-of-way signs are banned by state law ($500–$1,000 a day). Use private land with the owner's consent."};
+  if(city) return {k:"check",label:"Check city rule",why:`${city.replace(/ city$/,"")} sets its own right-of-way rule. Until checked, use private land with the owner's consent.`};
+  return {k:"check",label:"Check rules",why:"Jurisdiction not yet known."}}
 function build(rows){
   const seen=new Set();
   return rows.filter(r=>r.lat&&r.lon&&r.aadt>0&&!seen.has(r.id)&&seen.add(r.id)).map(r=>({...r,cls:classify(r.road)}));
@@ -253,7 +275,7 @@ const fromArr=a=>a.map(([id,road,aadt,lat,lon])=>({id,road,aadt,lat,lon}));
 
 function trafficScore(a){const lo=2000,hi=150000;return Math.max(0,Math.min(1,Math.log10(a/lo)/Math.log10(hi/lo)))}
 function score(s){
-  const t=trafficScore(s.aadt), f=field[s.id]||{};
+  const t=trafficScore(s.aadt), f={stop:ans(s,"stop"),speed:ans(s,"speed"),sight:ans(s,"sight"),poll:ans(s,"poll"),crowd:ans(s,"crowd")};
   const rr=f.speed?{low:.95,mid:.65,high:.3}[f.speed]:s.cls.read;
   let sum=W.traffic*t+W.read*rr, den=W.traffic+W.read;
   const parts={traffic:t,read:rr};
@@ -265,7 +287,8 @@ function score(s){
 }
 function visible(){
   const ih=document.getElementById("f-ih").checked, lo=document.getElementById("f-local").checked;
-  return stations.filter(s=>(ih||s.cls.key!=="IH")&&(!lo||!s.cls.state));
+  const fr=document.getElementById("f-free").checked;
+  return stations.filter(s=>(ih||s.cls.key!=="IH")&&(!lo||!s.cls.state)&&(!fr||status(s).k==="free"));
 }
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
 function mix(a,b,p){const h=x=>x.match(/\w\w/g).map(c=>parseInt(c,16));const A=h(a),B=h(b);return "#"+A.map((v,i)=>Math.round(v+(B[i]-v)*p).toString(16).padStart(2,"0")).join("")}
@@ -283,8 +306,8 @@ function drawMap(){
   for(const {s,sc} of list){
     const sel=selected===s.id;
     const m=L.circleMarker([s.lat,s.lon],{radius:(sel?9:5)+5*trafficScore(s.aadt),fillColor:mix(low,sign,sc/100),fillOpacity:.92,
-      color:s.cls.state?stake:"#ffffff",weight:sel?4:(s.cls.state?2.5:1.5),dashArray:s.cls.state?"4 3":null});
-    m.bindTooltip(`${esc(s.cls.label)} · ${sc}`,{className:"st-tip",direction:"top",permanent:sel});
+      color:{free:"#1f7a3a",consent:stake,check:"#b26a00"}[status(s).k],weight:sel?4.5:2.5,dashArray:status(s).k==="consent"?"4 3":null});
+    m.bindTooltip(`${esc(s.cls.label)} · ${sc} · ${status(s).label}`,{className:"st-tip",direction:"top",permanent:sel});
     m.on("click",()=>select(s.id,false));
     m.addTo(layer); markers[s.id]=m;
   }
@@ -305,7 +328,7 @@ function drawRank(){
     const li=document.createElement("li"); if(selected===s.id) li.className="sel";
     li.innerHTML=`<button type="button"><span class="score">${sc}</span>
       <span style="min-width:0"><div class="rd">${esc(s.cls.label)}</div><div class="meta">${s.aadt.toLocaleString()} veh/day · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}</div></span>
-      <span class="pill ${s.cls.state?"p-state":"p-local"}">${s.cls.state?"TxDOT ROW":"LOCAL"}</span></button>`;
+      <span class="pill p-${status(s).k}">${status(s).label}</span></button>`;
     li.querySelector("button").addEventListener("click",()=>select(s.id,true));
     ol.appendChild(li);
   }
@@ -331,28 +354,48 @@ const QS=[
  {k:"poll",t:"Polling place within ¼ mile?",o:[["yes","Yes"],["no","No"]]},
  {k:"crowd",t:"Already crowded with signs?",o:[["yes","Yes"],["no","No"]]},
 ];
-const LQ=[
- {k:"city",t:"Inside City of San Antonio limits?",o:[["yes","Yes"],["no","No"],["unsure","Unsure"]]},
- {k:"private",t:"On private property, owner approved?",o:[["yes","Yes"],["no","No"]]},
- {k:"line",t:"At least 2 ft inside the property line, outside any right-of-way?",o:[["yes","Yes"],["no","No"]]},
- {k:"size",t:"Sign 32 sq ft or less, staked or secured?",o:[["yes","Yes"],["no","No"]]},
+const LQ_FREE=[
+ {k:"stake",t:"Staked in the ground, not on a pole, tree, fence or sign?",o:[["yes","Yes"],["no","No"]]},
+ {k:"corner",t:"Outside the 25-ft corner triangle and clear of drivers' sight lines?",o:[["yes","Yes"],["no","No"]]},
  {k:"door",t:"More than 100 ft from a voter entrance (on voting days)?",o:[["yes","Yes"],["no","No"]]},
 ];
+const LQ_CONSENT=[
+ {k:"private",t:"Owner's written OK?",o:[["yes","Yes"],["no","No"]]},
+ {k:"line",t:"Off the right-of-way (in SA, more than 15 ft from the pavement edge; behind the TxDOT line on state routes)?",o:[["yes","Yes"],["no","No"]]},
+ {k:"size",t:"36 sq ft or less, 8 ft or less tall, not lit, no moving parts?",o:[["yes","Yes"],["no","No"]]},
+ {k:"door",t:"More than 100 ft from a voter entrance (on voting days)?",o:[["yes","Yes"],["no","No"]]},
+];
+function lqFor(s){return status(s).k==="free"?LQ_FREE:LQ_CONSENT}
 function verdict(s){
-  const f=field[s.id]||{}, fails=[], open=[];
-  if(f.private==="no") fails.push("San Antonio allows political signs on private property only, with the owner's approval first.");
-  if(f.line==="no") fails.push(s.cls.state?"Inside TxDOT right-of-way: illegal on a state route. Move behind the ROW line.":"Keep it at least 2 ft inside the property line (SA guide).");
-  if(f.size==="no") fails.push("Over 32 sq ft or not secured: needs a permit in San Antonio.");
-  if(f.door==="no") fails.push("Within 100 ft of a voter entrance during voting hours (Elec. Code §61.003).");
-  for(const q of LQ) if(!f[q.k]) open.push(q.t);
-  if(f.city==="no") open.unshift("Outside San Antonio: check that city's sign ordinance (or county rules if unincorporated).");
-  if(f.city==="unsure") open.unshift("Confirm the jurisdiction before placing.");
+  const f=field[s.id]||{}, st=status(s), fails=[], open=[];
+  if(f.stake==="no") fails.push("Signs must be self-standing on stakes; poles, trees, fences and signs are off-limits (SA Code \u00a728-75).");
+  if(f.corner==="no") fails.push("Inside the 25-ft corner triangle or a sight line: removable without notice (\u00a728-41).");
+  if(f.private==="no") fails.push("Needs the owner's written permission (SA Code \u00a728-10(a)).");
+  if(f.line==="no") fails.push(s.cls.state?"Inside TxDOT right-of-way: Class C misdemeanor and $500\u2013$1,000 a day.":"In the right-of-way here signs are not allowed without the city's OK.");
+  if(f.size==="no") fails.push("Over the state's protected size, lit or moving: the city may require a permit (Elec. Code \u00a7259.003).");
+  if(f.door==="no") fails.push("Within 100 ft of a voter entrance while polls are open (Elec. Code \u00a761.003).");
+  for(const q of lqFor(s)) if(!f[q.k]) open.push(q.t);
+  if(st.k==="check") open.unshift(st.why);
   if(fails.length) return {cls:"v-no",head:"Not allowed as described",items:fails};
-  if(open.length) return {cls:"v-wait",head:"Not cleared yet",items:open};
-  return {cls:"v-ok",head:"Clear to place",items:[s.cls.state?"Private frontage, behind TxDOT right-of-way, owner approved.":"Private property, owner approved, 2 ft inside the line.","Remove within 90 consecutive days."]};
+  if(open.length) return {cls:"v-wait",head:st.k==="free"?"No permission needed \u2014 confirm placement":"Not cleared yet",items:open};
+  return {cls:"v-ok",head:"Clear to place",items:[st.k==="free"?"City right-of-way, San Antonio. Take it down within 90 days after the election.":"Private land with the owner's written OK, off the right-of-way."]};
 }
-function seg(id,q,f){
-  return `<div class="q"><span id="${id}-${q.k}-l">${q.t}</span><span class="seg" role="group" aria-labelledby="${id}-${q.k}-l">${q.o.map(([v,l])=>`<button type="button" id="${id}-${q.k}-${v}" data-k="${q.k}" data-v="${v}" aria-pressed="${f[q.k]===v}">${l}</button>`).join("")}</span></div>`;
+function seg(id,q,s){
+  const f=field[s.id]||{}, cur=ans(s,q.k), isAuto=f[q.k]===undefined&&auto(s)[q.k]!==undefined;
+  return `<div class="q"><span id="${id}-${q.k}-l">${q.t}${isAuto?'<span class="auto">AUTO</span>':""}</span><span class="seg" role="group" aria-labelledby="${id}-${q.k}-l">${q.o.map(([v,l])=>`<button type="button" id="${id}-${q.k}-${v}" data-k="${q.k}" data-v="${v}" aria-pressed="${cur===v}">${l}</button>`).join("")}</span></div>`;
+}
+function foundBox(s){
+  const e=ENR[s.id]; if(!e) return "";
+  const st=status(s), p=e.parcels||{}, types=Object.entries(p.types||{}).sort((a,b)=>b[1]-a[1]).map(([t,n])=>`${esc(t)} ${n}`).join(", ");
+  const dist=m=>m==null?"none mapped nearby":`${m} m`;
+  return `<div class="found">
+    <div><span class="pill p-${st.k}">${st.label}</span> ${esc(st.why)}</div>
+    <div><b>City:</b> ${esc((e.city||"unknown").replace(/ city$/,""))}</div>
+    <div><b>Nearest signal:</b> ${dist(e.signal_m)} \u00b7 <b>stop sign:</b> ${dist(e.stop_m)}</div>
+    <div><b>Speed limit:</b> ${e.speed?`${e.speed} mph${e.speed_road?" ("+esc(e.speed_road)+")":""}`:"not mapped"}</div>
+    <div><b>Land within ~45 m:</b> ${types||"no parcels found"}${(p.public_owners||[]).length?" \u00b7 public: "+p.public_owners.map(esc).join("; "):""}</div>
+    <div class="meta">Auto-researched: Census city limits, OpenStreetMap, Bexar Appraisal District. Tap a button to override.</div>
+  </div>`;
 }
 function drawDetail(){
   const box=document.getElementById("detail"), s=stations.find(x=>x.id===selected);
@@ -377,8 +420,9 @@ function drawDetail(){
      <p class="note">The count station marks a road segment. Use Street View to find the actual corner and the private lot you'd ask.</p>
    </div>
    <div>
-     <fieldset><legend>Field check</legend>${QS.map(q=>seg("fq",q,f)).join("")}</fieldset>
-     <fieldset><legend>Legal check</legend>${LQ.map(q=>seg("lq",q,f)).join("")}</fieldset>
+     ${foundBox(s)}
+     <fieldset><legend>Field check</legend>${QS.map(q=>seg("fq",q,s)).join("")}</fieldset>
+     <fieldset><legend>Legal check</legend>${lqFor(s).map(q=>seg("lq",q,s)).join("")}</fieldset>
      <div class="verdict ${v.cls}"><b>${v.head}</b>${v.items.length?`<ul>${v.items.map(i=>`<li>${esc(i)}</li>`).join("")}</ul>`:""}</div>
    </div></div>`;
   if(!addrCache[s.id]) lookupAddress(s).then(a=>{const el=document.getElementById("addr");if(el&&selected===s.id)el.firstChild.textContent=a}).catch(()=>{const el=document.getElementById("addr");if(el)el.firstChild.textContent="Address lookup unavailable; use the coordinates below."});
@@ -406,19 +450,20 @@ function drawWeights(){
 
 let dataLabel="";
 function renderAll(){document.getElementById("datatag").innerHTML=dataLabel;drawMap();drawRank();drawDetail()}
-["f-ih","f-local"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderAll();fitAll()}));
+["f-ih","f-local","f-free"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderAll();fitAll()}));
 drawWeights();
 
 (async()=>{
   try{
     const r=await fetch("data/bexar-aadt.json",{cache:"no-cache"}); if(!r.ok) throw 0;
     const d=await r.json(); stations=build(fromArr(d.stations));
+    try{const er=await fetch("data/bexar-enrich.json",{cache:"no-cache"});if(er.ok)ENR=(await er.json()).stations||{}}catch(e){}
     dataLabel=`<b>${stations.length}</b> TxDOT count stations · AADT ${d.aadt_year||""}<br>updated ${esc(d.fetched||"")}`;
   }catch(e){
     stations=build(fromArr(SAMPLE));
     dataLabel=`<b>Sample:</b> ${stations.length} real TxDOT 2025 stations<br>full data loads after the first refresh`;
   }
-  selected=[...stations].filter(s=>!s.cls.state).sort((a,b)=>score(b).total-score(a).total)[0]?.id||null;
+  selected=[...stations].filter(s=>status(s).k==="free"||!s.cls.state).sort((a,b)=>score(b).total-score(a).total)[0]?.id||null;
   renderAll(); fitAll();
 })();
 </script>

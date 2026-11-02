@@ -7,6 +7,7 @@ without TxDOT's written consent.
 Usage: python scripts/fetch_aadt.py 15 data/bexar-aadt.json   (15 = Bexar County)
 """
 import json
+import os
 import sys
 import time
 import urllib.parse
@@ -70,6 +71,7 @@ def main():
         "fields": ["id", "road", "aadt", "lat", "lon"],
         "stations": rows,
     }
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as fh:
         json.dump(doc, fh, separators=(",", ":"))
     print(f"Wrote {len(rows)} stations to {out}")

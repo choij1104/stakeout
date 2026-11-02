@@ -117,6 +117,15 @@ body{margin:0}
 .addr small{display:block;color:var(--muted);font-size:11px}
 .why{font-size:12.5px;line-height:1.3;margin:2px 0;white-space:normal}
 .why-free{color:var(--ok)}.why-consent{color:var(--stake)}.why-check{color:var(--warn)}
+dialog#terms{max-width:640px;width:calc(100% - 32px);border:1px solid var(--line);border-radius:8px;padding:0;background:var(--panel);color:var(--ink)}
+dialog#terms::backdrop{background:rgba(10,20,15,.6)}
+.terms-body{padding:20px;display:grid;gap:10px;font-size:14px;line-height:1.5;max-height:80vh;overflow:auto}
+.terms-body p{margin:0}
+.agree{display:flex;gap:8px;align-items:flex-start;font-weight:600}
+#agree-btn{all:unset;cursor:pointer;text-align:center;font-weight:800;padding:12px;border-radius:4px;background:var(--sign);color:#fff}
+#agree-btn[disabled]{opacity:.4;cursor:not-allowed}
+.linkbtn{all:unset;cursor:pointer;font-size:12px;text-decoration:underline;color:var(--muted)}
+.disclaimer p{margin:0;font-size:13px;color:var(--muted)}
 .p-free{background:var(--sign-soft);color:var(--ok)}
 .p-consent{background:var(--stake-soft);color:var(--stake)}
 .p-check{background:var(--stake-soft);color:var(--warn)}
@@ -126,13 +135,23 @@ body{margin:0}
 </style>
 </head>
 <body>
+<dialog id="terms" aria-labelledby="terms-h">
+  <div id="terms-h" class="terms-body"><h2 style="margin:0 0 8px">Before you use Stakeout</h2>
+  <p><b>Information only, not legal advice.</b> Stakeout summarizes public traffic counts and sign rules to help you plan. It does not tell you that any specific spot is legal. Sign laws differ by city, change without notice, and depend on facts on the ground the app cannot see, such as property lines, right-of-way width, sight lines and polling-place entrances.</p>
+  <p><b>Data may be wrong or out of date.</b> Traffic counts (TxDOT), city limits (US Census), map, signals and speed limits (OpenStreetMap) and land-owner type (Bexar Appraisal District) come from third parties and are provided as-is, with no warranty of accuracy or completeness.</p>
+  <p><b>You are responsible.</b> By using Stakeout you agree that you alone decide where to place any sign, that you will get any owner's permission and follow all laws and ordinances, and that you take full responsibility for your placements and for any fines, removals, damage or other consequences. You use this information at your own risk. To the fullest extent the law allows, Stakeout and its makers accept no liability for any violation or loss arising from its use.</p>
+  <p><b>Check with the authority before you place.</b> City of San Antonio: <a href="https://www.sa.gov/Directory/Departments/DSD/CES/Process/Maintenance/Responsibilities/Signs-Right-of-Way-Responsibilities" target="_blank" rel="noopener">Signs &amp; Right-of-Way (Code Enforcement)</a> · <a href="https://library.municode.com/tx/san_antonio/codes/code_of_ordinances" target="_blank" rel="noopener">City Code, Chapter 28 Signs</a> · Chief Sign Inspector 210-207-0158 · State highways: <a href="https://www.txdot.gov/inside-txdot/division/right-of-way/campaign-signs.html" target="_blank" rel="noopener">TxDOT campaign signs</a>.</p>
+  <label class="agree"><input type="checkbox" id="agree-box"> I have read this and agree to take full responsibility for how I use Stakeout.</label>
+  <button type="button" id="agree-btn" disabled>Agree and continue</button>
+  </div>
+</dialog>
 <div class="wrap">
 <header>
   <div>
     <h1>Stake<span>out</span> <small style="font-size:.45em;font-weight:600;color:var(--muted);letter-spacing:.04em">BEXAR CO., TX</small></h1>
     <p class="sub">Where a yard sign gets seen, and whether you can legally put it there. Ranked from TxDOT traffic counts, then checked against Texas and San Antonio sign rules.</p>
   </div>
-  <div class="datatag" id="datatag">Loading stations…</div>
+  <div style="display:grid;gap:6px;justify-items:end"><div class="datatag" id="datatag">Loading stations…</div><button type="button" id="open-terms" class="linkbtn">Disclaimer &amp; terms</button></div>
 </header>
 
 <div class="grid">
@@ -187,6 +206,11 @@ body{margin:0}
       <div class="src">Tex. Elec. Code §259.003; Transp. Code §§393.002, 393.007</div></div>
   </div>
   <p class="note">Other cities in Bexar County (Selma, Schertz, Converse, Leon Valley…) and unincorporated areas have their own ordinances. This is a planning aid, not legal advice.</p>
+</section>
+
+<section class="card disclaimer" aria-labelledby="h-disc">
+  <h2 id="h-disc">Disclaimer</h2>
+  <p>Information only, not legal advice. Data comes from third parties and may be wrong or out of date. You decide where signs go, you get any owner's permission, and you take full responsibility for any violation, fine or removal; you use this information at your own risk. Stakeout and its makers accept no liability. City of San Antonio sign rules: <a href="https://www.sa.gov/Directory/Departments/DSD/CES/Process/Maintenance/Responsibilities/Signs-Right-of-Way-Responsibilities" target="_blank" rel="noopener">Signs &amp; Right-of-Way</a> · <a href="https://library.municode.com/tx/san_antonio/codes/code_of_ordinances" target="_blank" rel="noopener">City Code Ch. 28</a> · Chief Sign Inspector 210-207-0158.</p>
 </section>
 
 <section class="card" aria-labelledby="h-data">
@@ -461,6 +485,16 @@ let dataLabel="";
 function renderAll(){document.getElementById("datatag").innerHTML=dataLabel;drawMap();drawRank();drawDetail()}
 ["f-ih","f-local","f-free"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderAll();fitAll()}));
 drawWeights();
+
+// ---------- terms gate ----------
+const TERMS_KEY="so-terms-v1", dlg=document.getElementById("terms");
+const agreeBox=document.getElementById("agree-box"), agreeBtn=document.getElementById("agree-btn");
+agreeBox.addEventListener("change",()=>{agreeBtn.disabled=!agreeBox.checked});
+agreeBtn.addEventListener("click",()=>{if(!agreeBox.checked)return;agreedAt=new Date().toISOString();try{localStorage.setItem(TERMS_KEY,agreedAt)}catch(e){}dlg.close()});
+let agreedAt=null;try{agreedAt=localStorage.getItem(TERMS_KEY)}catch(e){}
+dlg.addEventListener("cancel",e=>{if(!agreedAt)e.preventDefault()});
+document.getElementById("open-terms").addEventListener("click",()=>{agreeBox.checked=!!agreedAt;agreeBtn.disabled=!agreeBox.checked;dlg.showModal()});
+if(!agreedAt) dlg.showModal();
 
 (async()=>{
   try{

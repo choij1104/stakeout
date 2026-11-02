@@ -115,6 +115,8 @@ body{margin:0}
 .leaflet-tooltip.st-tip{font-family:var(--f-display);font-weight:800;font-size:12px;border-radius:3px}
 .addr{font-size:14px;margin:8px 0 0;min-height:1.4em}
 .addr small{display:block;color:var(--muted);font-size:11px}
+.why{font-size:12.5px;line-height:1.3;margin:2px 0;white-space:normal}
+.why-free{color:var(--ok)}.why-consent{color:var(--stake)}.why-check{color:var(--warn)}
 .p-free{background:var(--sign-soft);color:var(--ok)}
 .p-consent{background:var(--stake-soft);color:var(--stake)}
 .p-check{background:var(--stake-soft);color:var(--warn)}
@@ -139,14 +141,14 @@ body{margin:0}
     <div class="controls">
       <label><input type="checkbox" id="f-ih"> Show interstates</label>
       <label><input type="checkbox" id="f-local"> Local streets only</label>
-      <label><input type="checkbox" id="f-free"> No-permission spots only</label>
+      <label><input type="checkbox" id="f-free"> Roadside-allowed spots only</label>
       <span class="zoom"><button type="button" id="z-me">Near me</button><button type="button" id="z-reset">Fit all</button></span>
     </div>
     <div id="map" role="region" aria-label="Street map of traffic count stations colored by visibility score"></div>
     <div class="legend">
-      <span><i class="lg-local" style="background:transparent;border:3px solid #1f7a3a"></i>No permission needed (SA city street)</span>
-      <span><i class="lg-state"></i>Owner's consent needed (state route or county road)</span>
-      <span><i class="lg-local" style="background:transparent;border:3px solid #b26a00"></i>Other city: check its rule</span>
+      <span><i class="lg-local" style="background:transparent;border:3px solid #1f7a3a"></i>Roadside allowed (San Antonio city street)</span>
+      <span><i class="lg-state"></i>Roadside not allowed (state highway or county road)</span>
+      <span><i class="lg-local" style="background:transparent;border:3px solid #b26a00"></i>Not confirmed (other city)</span>
       <span><i class="lg-grad"></i>Score low → high</span>
     </div>
   </section>
@@ -260,6 +262,12 @@ function auto(s){const e=ENR[s.id]||{};const a={};
   if(e.city) a.city=e.city==="San Antonio city"?"yes":"no";
   return a}
 function ans(s,k){const f=field[s.id]||{};return f[k]!==undefined?f[k]:auto(s)[k]}
+// Plain verdict for the roadside: allowed or not, and why
+function roadside(s){const st=status(s),c=((ENR[s.id]||{}).city||"").replace(/ city$/,"");
+  if(st.k==="free") return {v:"Allowed",why:"San Antonio city street \u2014 roadside OK, no permission needed"};
+  if(s.cls.state) return {v:"Not allowed",why:"State highway (TxDOT) \u2014 roadside banned; private land with owner's OK only"};
+  if(c==="Unincorporated") return {v:"Not allowed",why:"County road outside city limits \u2014 roadside banned; private land with owner's OK only"};
+  return {v:"Not confirmed",why:`${c||"This city"}'s sign rules not checked yet \u2014 use private land with owner's OK`}}
 // Placement status from the rules in the Political Sign Law doc
 function status(s){const e=ENR[s.id]||{};const city=e.city||"";
   if(s.cls.state) return {k:"consent",label:"Owner OK needed",why:"State route: TxDOT right-of-way is banned. Private frontage behind it needs the owner's consent."};
@@ -307,7 +315,7 @@ function drawMap(){
     const sel=selected===s.id;
     const m=L.circleMarker([s.lat,s.lon],{radius:(sel?9:5)+5*trafficScore(s.aadt),fillColor:mix(low,sign,sc/100),fillOpacity:.92,
       color:{free:"#1f7a3a",consent:stake,check:"#b26a00"}[status(s).k],weight:sel?4.5:2.5,dashArray:status(s).k==="consent"?"4 3":null});
-    m.bindTooltip(`${esc(s.cls.label)} · ${sc} · ${status(s).label}`,{className:"st-tip",direction:"top",permanent:sel});
+    m.bindTooltip(`${esc(s.cls.label)} · ${roadside(s).v}`,{className:"st-tip",direction:"top",permanent:sel});
     m.on("click",()=>select(s.id,false));
     m.addTo(layer); markers[s.id]=m;
   }
@@ -327,8 +335,8 @@ function drawRank(){
   for(const {s,sc} of list){
     const li=document.createElement("li"); if(selected===s.id) li.className="sel";
     li.innerHTML=`<button type="button"><span class="score">${sc}</span>
-      <span style="min-width:0"><div class="rd">${esc(s.cls.label)}</div><div class="meta">${s.aadt.toLocaleString()} veh/day · ${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}</div></span>
-      <span class="pill p-${status(s).k}">${status(s).label}</span></button>`;
+      <span style="min-width:0"><div class="rd">${esc(s.cls.label)}</div><div class="why why-${status(s).k}">${esc(roadside(s).why)}</div><div class="meta">${s.aadt.toLocaleString()} veh/day</div></span>
+      <span class="pill p-${status(s).k}">${roadside(s).v}</span></button>`;
     li.querySelector("button").addEventListener("click",()=>select(s.id,true));
     ol.appendChild(li);
   }
@@ -389,7 +397,8 @@ function foundBox(s){
   const st=status(s), p=e.parcels||{}, types=Object.entries(p.types||{}).sort((a,b)=>b[1]-a[1]).map(([t,n])=>`${esc(t)} ${n}`).join(", ");
   const dist=m=>m==null?"none mapped nearby":`${m} m`;
   return `<div class="found">
-    <div><span class="pill p-${st.k}">${st.label}</span> ${esc(st.why)}</div>
+    <div style="font-size:16px"><span class="pill p-${st.k}" style="font-size:13px">Roadside: ${roadside(s).v}</span> ${esc(roadside(s).why)}</div>
+    <div class="meta">${esc(st.why)}</div>
     <div><b>City:</b> ${esc((e.city||"unknown").replace(/ city$/,""))}</div>
     <div><b>Nearest signal:</b> ${dist(e.signal_m)} \u00b7 <b>stop sign:</b> ${dist(e.stop_m)}</div>
     <div><b>Speed limit:</b> ${e.speed?`${e.speed} mph${e.speed_road?" ("+esc(e.speed_road)+")":""}`:"not mapped"}</div>
